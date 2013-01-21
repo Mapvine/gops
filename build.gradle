@@ -1,0 +1,202 @@
+ext.version = '0.0.6'
+ext.jarVersion = '1.0.24-SNAPSHOT'
+ext.buildhost = 'hostname'.execute().text.trim()
+
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        mavenRepo url: 'http://oss.sonatype.org/content/repositories/releases/'
+    }
+    dependencies {
+        classpath 'com.mapvine:gradle-cobertura-plugin:1.0'
+    }
+}
+
+/**
+ * CodeNarc runner task
+ */
+def modules = ['api', 'client/dnb', 'client/mongo', 'client/couch', 'client/common', 'config', 'http', 'model', 'service', 'utility']
+ext.codenarcRuleSetFiles = ['codenarc.groovy']
+ext.codenarcPriority1Violations = 10
+ext.codenarcPriority2Violations = 100
+ext.codenarcPriority3Violations = 200
+ext.codenarcReportDir = 'reports'
+ext.codenarcReportType = 'xml'
+ext.codenarcReportFile = 'codenarc.xml'
+ext.codenarcSources = modules.collect { ["$it/src/main/groovy", "$it/src/main/java"] }.flatten()
+apply from: 'https://raw.github.com/evgeny-goldin/gradle-plugins/master/codenarc/CodeNarc.gradle'
+apply plugin: 'build-announcements'
+
+allprojects {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        // for netty
+        mavenRepo url: 'http://repository.jboss.org/nexus/content/groups/public/'
+
+        // for spock and asyncHttp
+        mavenRepo url: 'http://oss.sonatype.org/content/repositories/snapshots/'
+    }
+
+    apply plugin: 'groovy'
+    apply plugin: 'maven'
+    apply plugin: 'idea'
+    apply plugin: 'cobertura'
+
+    sourceSets.main.groovy.srcDirs = ["src/main/groovy"]
+
+    groovydoc.groovyClasspath = configurations.default
+
+    idea.module {
+        ext.gradleCacheVariable = 'GRADLE_CACHE'
+        ext.downloadJavadoc = true
+    }
+
+    idea.project {
+        ext.jdkName = '1.7'
+        ext.wildcards = ['!?*.java', '!?*.groovy']
+    }
+
+    // FIXME: git integration with idea not working... grrr
+    //idea.project.ipr {
+    //    withXml { provider ->
+    //        provider.node.component.find { it.@name == 'VcsDirectoryMappings' }.mapping.@vcs = 'Git'
+    //    }
+    //}
+
+    ext.cxfVersion = '2.4.2'
+    ext.cxf = [
+            "org.apache.cxf:cxf-api:${cxfVersion}",
+            "org.apache.cxf:cxf-common-utilities:${cxfVersion}",
+            "org.apache.cxf:cxf-rt-core:${cxfVersion}",
+            "org.apache.cxf:cxf-rt-bindings-soap:${cxfVersion}",
+            "org.apache.cxf:cxf-rt-transports-http:${cxfVersion}",
+            "org.apache.cxf:cxf-rt-frontend-jaxws:${cxfVersion}",
+            "org.apache.cxf:cxf-rt-frontend-simple:${cxfVersion}",
+            "wsdl4j:wsdl4j:1.6.2"
+    ]
+
+    ext.logback = "ch.qos.logback:logback-classic:1.0.6"
+    ext.ratpack = "com.mapvine:ratpack-core:0.7-SNAPSHOT"
+    ext.netty = "io.netty:netty:3.5.7.Final"
+    ext.jodaTime = "joda-time:joda-time:1.6.2"
+    ext.groovy = "org.codehaus.groovy:groovy-all:2.0.5"
+    ext.gpars = "org.codehaus.gpars:gpars:0.12"
+    ext.mongo = "com.gmongo:gmongo:1.0"
+    ext.httpBuilder = "org.codehaus.groovy.modules.http-builder:http-builder:0.5.2"
+    ext.servletApi = 'javax.servlet:servlet-api:2.5'
+    ext.jackson = 'org.codehaus.jackson:jackson-jaxrs:1.9.9'
+    ext.asyncHttp = "com.ning:async-http-client:1.8.0-SNAPSHOT"
+
+    // test dependencies
+    ext.junit = 'junit:junit:4.10'
+    ext.spock = "org.spockframework:spock-core:0.7-groovy-2.0"
+}
+
+subprojects {
+    configurations {
+        compile.transitive = true
+        all*.exclude group: 'org.slf4j', module: 'slf4j-simple'
+    }
+
+    apply plugin: 'application'
+    mainClassName = "com.mapvine.modelengine.api.server.HttpApiServer"
+
+    run {
+        args = ['9090']
+    }
+
+    task(runDebug, dependsOn: 'classes', type: JavaExec) {
+        main = mainClassName
+        classpath = sourceSets.main.runtimeClasspath
+        jvmArgs = ["-Xdebug", "-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"]
+    }
+
+    task stage(dependsOn: ['clean', 'installApp'])
+
+    dependencies {
+        groovy groovy
+        compile jodaTime
+        compile groovy
+        compile logback
+        compile gpars
+        testCompile junit
+        testCompile spock
+    }
+
+    cobertura {
+        format = 'xml'
+        includes = ['**/*.java', '**/*.groovy']
+    }
+
+    task testJar(type: Jar, dependsOn: testClasses) {
+        baseName = "test-${project.archivesBaseName}"
+        from sourceSets.test.output
+    }
+
+    configurations {
+        tests
+    }
+
+    artifacts {
+        tests testJar
+    }
+
+    test {
+        String testType = System.properties['test.type']
+        if (testType == 'integration') {
+            include '**/*IntegrationTest.*'
+            include '**/*IntegrationSpec.*'
+        } else if (testType == 'unit') {
+            include '**/*Test.*'
+            include '**/*Spec.*'
+            exclude '**/*IntegrationTest.*'
+            exclude '**/*IntegrationSpec.*'
+        } else if (testType == 'all') {
+            include '**/*Test.*'
+            include '**/*Spec.*'
+        } else {
+            //Default to unit
+            include '**/*Test.*'
+            include '**/*Spec.*'
+            exclude '**/*IntegrationTest.*'
+            exclude '**/*IntegrationSpec.*'
+        }
+
+        // Prints results of test inline
+        afterSuite { desc, result ->
+            // Don't report on modules with no test suites
+            if (!desc.className) {
+                return
+            }
+
+            String testStatus
+            if (System.properties['nocolor']) {
+                testStatus = result.resultType
+            } else if (result.resultType != org.gradle.api.tasks.testing.TestResult.ResultType.SUCCESS) {
+                // Print in red if failed
+                testStatus = "\033[31m${result.resultType}\033[0m"
+            } else {
+                // Print in green if success/skipped
+                testStatus = "\033[32m${result.resultType}\033[0m"
+            }
+            println "Test suite ${desc.name}: ${testStatus}"
+        }
+    }
+
+    task integrationTest(type: Test) {
+        description = 'Runs the integration tests :D'
+        group = 'Verification'
+        include '**/*IntegrationTest.*'
+        include '**/*IntegrationSpec.*'
+        afterSuite { desc, result ->
+            if (desc.className)
+                println "Test suite ${desc.name}: ${result.resultType}"
+        }
+    }
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '1.2'
+}
