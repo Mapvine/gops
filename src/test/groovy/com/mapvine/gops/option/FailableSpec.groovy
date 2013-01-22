@@ -1,6 +1,5 @@
 package com.mapvine.gops.option
 
-import com.mapvine.gops.option.Failables
 import com.mapvine.gops.option.failable.Fail
 import spock.lang.Specification
 
