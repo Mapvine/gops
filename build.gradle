@@ -1,4 +1,12 @@
-ext.version = '0.0.6'
+apply plugin: 'groovy'
+apply plugin: 'maven'
+apply plugin: 'signing'
+apply plugin: 'idea'
+
+version = '0.1'
+group = 'com.mapvine'
+ext.archivesBaseName = 'gops'
+ext.isSnapshot = version.endsWith("-SNAPSHOT")
 
 buildscript {
     repositories {
@@ -8,112 +16,154 @@ buildscript {
     }
 }
 
-allprojects {
-    repositories {
-        mavenLocal()
-        mavenCentral()
-        // for netty
-        mavenRepo url: 'http://repository.jboss.org/nexus/content/groups/public/'
+repositories {
+    mavenLocal()
+    mavenCentral()
+    // for spock
+    mavenRepo url: 'http://oss.sonatype.org/content/repositories/snapshots/'
+}
 
-        // for spock and asyncHttp
-        mavenRepo url: 'http://oss.sonatype.org/content/repositories/snapshots/'
-    }
+sourceSets.main.groovy.srcDirs = ["src/main/groovy"]
 
-    apply plugin: 'groovy'
-    apply plugin: 'maven'
-    apply plugin: 'idea'
-    sourceSets.main.groovy.srcDirs = ["src/main/groovy"]
+idea.module {
+    ext.gradleCacheVariable = 'GRADLE_CACHE'
+    ext.downloadJavadoc = true
+}
 
-    groovydoc.groovyClasspath = configurations.default
+idea.project {
+    ext.jdkName = '1.7'
+    ext.wildcards = ['!?*.java', '!?*.groovy']
+}
 
-    idea.module {
-        ext.gradleCacheVariable = 'GRADLE_CACHE'
-        ext.downloadJavadoc = true
-    }
+ext.groovy = "org.codehaus.groovy:groovy-all:2.1"
+ext.junit = 'junit:junit:4.10'
+ext.spock = "org.spockframework:spock-core:0.7-groovy-2.0"
 
-    idea.project {
-        ext.jdkName = '1.7'
-        ext.wildcards = ['!?*.java', '!?*.groovy']
-    }
+dependencies {
+    groovy groovy
+    compile groovy
+    testCompile junit
+    testCompile spock
+}
 
-    ext.groovy = "org.codehaus.groovy:groovy-all:2.0.5"
-    ext.junit = 'junit:junit:4.10'
-    ext.spock = "org.spockframework:spock-core:0.7-groovy-2.0"
+idea.module {
+    ext.gradleCacheVariable = 'GRADLE_CACHE'
+    downloadJavadoc = true
+    ext.downloadSource = true
+    outputDir = file("intellij/out")
+    testOutputDir = file("intellij/testOut")
+}
 
-    dependencies {
-        groovy groovy
-        compile groovy
-        testCompile junit
-        testCompile spock
-    }
+idea.project.ipr.withXml { provider ->
+    def node = provider.asNode()
+    // Use git
+    def vcsConfig = node.component.find { it.'@name' == 'VcsDirectoryMappings' }
+    vcsConfig.mapping[0].'@vcs' = 'Git'
 
-    task testJar(type: Jar, dependsOn: testClasses) {
-        baseName = "test-${project.archivesBaseName}"
-        from sourceSets.test.output
-    }
+    // Set gradle home
+    def gradleSettings = node.appendNode('component', [name: 'GradleSettings'])
+    gradleSettings.appendNode('option', [name: 'SDK_HOME', value: gradle.gradleHomeDir.absolutePath])
+}
 
-    configurations {
-        tests
-    }
+task sourceJar(type: Jar) {
+    description = 'An archive of the source code for Maven Central'
+    classifier = 'sources'
+    from sourceSets.main.groovy
+}
 
-    artifacts {
-        tests testJar
-    }
+task groovydocJar(type: Jar) {
+    description = 'An archive of the GroovyDocs for Maven Central'
+    classifier = 'javadoc'
+    from groovydoc
+}
 
-    test {
-        String testType = System.properties['test.type']
-        if (testType == 'integration') {
-            include '**/*IntegrationTest.*'
-            include '**/*IntegrationSpec.*'
-        } else if (testType == 'unit') {
-            include '**/*Test.*'
-            include '**/*Spec.*'
-            exclude '**/*IntegrationTest.*'
-            exclude '**/*IntegrationSpec.*'
-        } else if (testType == 'all') {
-            include '**/*Test.*'
-            include '**/*Spec.*'
-        } else {
-            //Default to unit
-            include '**/*Test.*'
-            include '**/*Spec.*'
-            exclude '**/*IntegrationTest.*'
-            exclude '**/*IntegrationSpec.*'
-        }
+task testJar(type: Jar, dependsOn: testClasses) {
+    baseName = "test-${project.archivesBaseName}"
+    from sourceSets.test.output
+}
 
-        // Prints results of test inline
-        afterSuite { desc, result ->
-            // Don't report on modules with no test suites
-            if (!desc.className) {
-                return
-            }
+configurations {
+    tests
+}
 
-            String testStatus
-            if (System.properties['nocolor']) {
-                testStatus = result.resultType
-            } else if (result.resultType != org.gradle.api.tasks.testing.TestResult.ResultType.SUCCESS) {
-                // Print in red if failed
-                testStatus = "\033[31m${result.resultType}\033[0m"
-            } else {
-                // Print in green if success/skipped
-                testStatus = "\033[32m${result.resultType}\033[0m"
-            }
-            println "Test suite ${desc.name}: ${testStatus}"
-        }
-    }
-
-    task integrationTest(type: Test) {
-        description = 'Runs the integration tests :D'
-        group = 'Verification'
-        include '**/*IntegrationTest.*'
-        include '**/*IntegrationSpec.*'
-        afterSuite { desc, result ->
-            if (desc.className)
-                println "Test suite ${desc.name}: ${result.resultType}"
-        }
-    }
+artifacts {
+    tests testJar
 }
 
 task wrapper(type: Wrapper) {
     gradleVersion = '1.3'
 }
+
+artifacts {
+    archives groovydocJar, sourceJar
+}
+
+signing {
+    sign configurations.archives
+}
+
+// Only *require* signing if we are uploading a non snapshot version
+gradle.taskGraph.whenReady { taskGraph ->
+    tasks.withType(org.gradle.plugins.signing.Sign).all {
+        required = taskGraph.hasTask(":uploadArchives") && !isSnapshot
+    }
+}
+
+install.repositories.mavenInstaller {
+    pom.project(pomConfiguration)
+    if (signing.signatory) {
+        beforeDeployment { signing.signPom(it) }
+    }
+}
+
+uploadArchives {
+    repositories.mavenDeployer {
+        if (signing.signatory) {
+            beforeDeployment { signPom(it) }
+        }
+        name = 'mavenCentralReleaseDeployer'
+        repository(url: 'https://oss.sonatype.org/service/local/staging/deploy/maven2/') {
+            authentication(userName: System.properties['mavenCentralUsername'], password: System.properties['mavenCentralPassword'])
+            releases(updatePolicy: 'always')
+            snapshots(updatePolicy: 'always')
+        }
+        pom.project(pomConfiguration)
+    }
+}
+
+/**
+ * Create POM config and return for use by other tasks.
+ */
+def getPomConfiguration() {
+    return {
+        name 'Gradle Cobertura Plugin'
+        packaging 'jar'
+        description 'Gradle plugin for using Cobertura code coverage'
+        url 'https://github.com/Mapvine/gops'
+        licenses {
+            license {
+                name 'The Apache Software License, Version 2.0'
+                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution 'repo'
+            }
+        }
+        developers {
+            developer {
+                id 'johnnywey'
+                name 'Johnny Wey'
+                email 'johnny@mapvine.com'
+            }
+            developer {
+                id 'eriwen'
+                name 'Eric Wendelin'
+                email 'eric@mapvine.com'
+            }
+        }
+        scm {
+            connection 'scm:https://github.com/Mapvine/gops'
+            developerConnection 'scm:git@github.com:Mapvine/gops.git'
+            url 'https://github.com/Mapvine/gops'
+        }
+    }
+}
+

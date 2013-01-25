@@ -31,3 +31,5 @@ stacktrace.log
 
 .cache
 .target
+
+gradle.properties
