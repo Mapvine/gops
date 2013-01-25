@@ -3,18 +3,12 @@ apply plugin: 'maven'
 apply plugin: 'signing'
 apply plugin: 'idea'
 
+defaultTasks 'clean', 'build'
+
 version = '0.1'
 group = 'com.mapvine'
 ext.archivesBaseName = 'gops'
 ext.isSnapshot = version.endsWith("-SNAPSHOT")
-
-buildscript {
-    repositories {
-        mavenLocal()
-        mavenCentral()
-        mavenRepo url: 'http://oss.sonatype.org/content/repositories/releases/'
-    }
-}
 
 repositories {
     mavenLocal()
@@ -35,7 +29,7 @@ idea.project {
     ext.wildcards = ['!?*.java', '!?*.groovy']
 }
 
-ext.groovy = "org.codehaus.groovy:groovy-all:2.1"
+ext.groovy = "org.codehaus.groovy:groovy-all:2.1.0"
 ext.junit = 'junit:junit:4.10'
 ext.spock = "org.spockframework:spock-core:0.7-groovy-2.0"
 
@@ -136,9 +130,9 @@ uploadArchives {
  */
 def getPomConfiguration() {
     return {
-        name 'Gradle Cobertura Plugin'
+        name 'gops'
         packaging 'jar'
-        description 'Gradle plugin for using Cobertura code coverage'
+        description 'Options and other neat idioms for Groovy and Java'
         url 'https://github.com/Mapvine/gops'
         licenses {
             license {
